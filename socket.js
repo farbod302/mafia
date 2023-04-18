@@ -98,13 +98,13 @@ const SocketProvider = class {
                     let game_id = uuid(4)
                     let new_game = {
                         game_id,
-                        remain: 1 - req_space,
+                        remain: 3 - req_space,
                         users: users,
                         partys: [party_id]
                     }
                     this.db.add_data("game_q", new_game)
                     this.io.to(party_id).emit("join_status", { users:users.map(e=>{return {...e,avatar:`${Static.url}/files/0.png`}}) })
-                    if (req_space === 1) {
+                    if (req_space === 3) {
                         this.create_game(game_id)
                     }
 

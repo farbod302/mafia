@@ -26,6 +26,7 @@ const Game = class {
     //main cycle
 
     async cycle() {
+
         const { next_event } = this.vars
         switch (next_event) {
 
@@ -50,24 +51,24 @@ const Game = class {
                         this.vars.edit_event("edit", "next_event", "start_speech")
                         this.reval_mafia()
                         this.vars.edit_event("edit", "reval", true)
-                        await delay(3)
+                        await delay(2)
                         this.cycle()
                         return
                     }
                     else {
-                        console.log(this.vars);
                         let vote_type = this.vars.vote_type === "pre_vote" ? "start_vote" : "start_exit_vote"
                         this.vars.edit_event("edit", "next_event", vote_type)
+                        this.vars.edit_event("edit", "turn", -1, "start exit")
+
                         return this.cycle()
                     }
                 }
                 const { game_id } = this
-                await delay(2)
+                await delay(5)
                 this.socket.to(game_id).emit("speech_turn", { user: queue[turn].device_id })
                 break
             }
             case ("next_player_pre_vote"): {
-
                 const pre_turn = this.vars.turn
                 let pre_player = this.vars.queue[pre_turn]
                 const { vote_type } = this.vars
@@ -104,37 +105,44 @@ const Game = class {
                             if (users_to_exit_vote.length > 0) {
                                 this.vars.edit_event("edit", "next_event", "speech")
                                 this.vars.edit_event("edit", "vote_type", "exit_vote")
-                                this.vars.edit_event("edit", "turn", -1)
+                                this.vars.edit_event("edit", "turn", -1, "start exit")
                                 this.vars.edit_event("edit", "queue", users_to_exit_vote)
                                 this.cycle()
                                 return
                             }
                             else {
-                                this.vars.edit_event("edit", "next_event", "night")
-                                console.log("start night");
+                                this.vars.edit_event("edit", "next_event", "start_night")
+                                this.cycle()
+
                                 return
                             }
                         }
                     }
 
+
                 }
-                let players = this.pick_live_users()
-                console.log({ players });
-                let players_can_vote = players.filter(e => e.user_id !== queue[turn].user_id)
-                for (let player of players_can_vote) {
-                    console.log(player);
-                    this.socket.to(player.socket_id).emit("vote_to_player", { user: queue[turn].user_id })
+                else {
+
+                    let players = this.pick_live_users()
+                    let players_can_vote = players.filter(e => e.user_id !== queue[turn].user_id)
+                    for (let player of players_can_vote) {
+                        this.socket.to(player.socket_id).emit("vote_to_player", { user: queue[turn].user_id })
+                    }
+                    this.socket.to(queue[turn].socket_id).emit("cant_vote")
+                    await delay(5)
+                    this.cycle()
                 }
-                this.socket.to(queue[turn].socket_id).emit("cant_vote")
-                await delay(5)
-                this.cycle()
                 break
             }
             case ("start_exit_vote"): {
-                this.vars.edit_event("edit", "turn", "plus")
+                this.vars.edit_event("edit", "turn", "plus",)
+                this.vars.edit_event("edit", "cur_event", "exit_vote")
                 const { queue, turn } = this.vars
+                console.log({ queue, turn });
                 if (queue.length === turn) {
                     this.vars.edit_event("edit", "next_event", "count_exit_votes")
+                    this.cycle()
+                    return
                 }
                 let players = this.pick_live_users()
                 let players_can_vote = []
@@ -148,17 +156,28 @@ const Game = class {
                 for (let player of players_can_vote) {
                     this.socket.to(player.socket_id).emit("vote_to_player", { user: queue[turn].user_id })
                 }
-                await delay(8)
+                await delay(5)
                 this.cycle()
+                break
+
+            }
+
+            case ("count_exit_votes"): {
+                this.count_exit_votes()
+                break
 
             }
             case ("start_vote"): {
                 await this.start_vote()
+                break
             }
-
-
-            case ("nigth"): {
+            case ("start_night"): {
                 this.start_night()
+                break
+            }
+            case ("take_hostage"): {
+                this.take_hosteg()
+                break
             }
         }
 
@@ -169,6 +188,7 @@ const Game = class {
         let rols = [...Rols[this.game_senario]]
         rols = Helper.suffel_arr(rols)
         rols = rols.map(e => { return { cart: e, player: null } })
+        console.log(rols);
         this.vars.edit_event("new_value", "carts", rols)
     }
     async cart_pick_q_start() {
@@ -176,7 +196,6 @@ const Game = class {
         this.vars.edit_event("edit", "queue", users)
         await this.voice_bridge_token_generator()
         this.shuffel_carts()
-        console.log("im call from start");
         this.next_player_pick_cart()
     }
     next_player_pick_cart() {
@@ -192,11 +211,9 @@ const Game = class {
         }
         let user = this.db.getOne("users", "id", turn)
         this.socket.to(this.game_id).emit("pick_cart_phase", { users: this.users, carts, cur_turn: user })
-        console.log(carts);
         this.socket.to(user.socket_id).emit("pick_cart")
     }
     reval_mafia() {
-        console.log("im cull reval");
         const mafia_rols = [
             "godfather",
             "nato",
@@ -252,6 +269,7 @@ const Game = class {
             }
             case ("vote"): {
                 const { day, cur_event, turn, queue } = this.vars
+                console.log({ cur_event });
                 let user = queue[turn]
                 let new_vote = {
                     to: user,
@@ -262,6 +280,7 @@ const Game = class {
                 this.db.add_data("vote_recorde", new_vote)
                 const { game_id } = this.vars
                 this.socket.to(game_id).emit("player_voted", { user: client.idenity })
+                console.log(`${client.idenity.user_id} voted to ${user}`);
                 break
             }
 
@@ -295,7 +314,7 @@ const Game = class {
                 if (is_chosen) {
                     let queue = [about, client]
                     prv_queue = prv_queue.concat(queue)
-                    this.vars.edit_event("edit", "queue", prv_queue)
+                    this.vars.edit_event("edit", "queue", prv_queue, "choose about")
                     w8 = w8.filter(e => e.user_id !== client.user_id)
                     if (w8.length === 0) {
                         this.vars.edit_event("edit", "next_event", "speech")
@@ -308,49 +327,32 @@ const Game = class {
             }
 
 
-            case ("mafia_shot"): {
-                const { user } = data
-                const { day } = this.vars
-                let cur_night = this.db.getOne("night_record", "night", day)
-                cur_night.records.push({
-                    event: "mafia_shot",
-                    player: user.user_id
-                })
-                this.db.replaceOne("night_record", "night", day, cur_night)
-                this.cycle()
-
-            }
-
-            case ("host"): {
-                const { users } = data
-                const { day } = this.vars
-                let cur_night = this.db.getOne("night_record", "night", day)
-                users.forEach(user => {
-                    cur_night.records.push({
-                        event: "hostage",
-                        player: user.user_id
-                    })
-                })
-                this.db.replaceOne("night_record", "night", day, cur_night)
-
-                this.vars.edit_event("edit", "next_event", "other_acts")
-                this.cycle()
-
-            }
-
 
             case ("act"): {
                 const { users, role } = data
                 const { day } = this.vars
-                let cur_night = this.db.getOne("night_record", "night", day)
-                users.forEach(user => {
-                    cur_night.records.push({
-                        event: role,
-                        player: user.user_id
-                    })
-                })
-                this.db.replaceOne("night_record", "night", day, cur_night)
+                let new_record = {
+                    event: role,
+                    player: users
+                }
 
+                this.db.add_data("night_record", { night: day, records: [new_record] })
+                console.log(this.db.getOne("night_record", "night", 1));
+
+                switch (role) {
+                    case ("guard"): {
+                        this.vars.edit_event("edit", "next_event", "take_hostage")
+                        break
+                    }
+                    case ("hostageـtaker"): {
+                        this.vars.edit_event("edit", "next_event", "mafia_shot")
+                        break
+                    }
+                    default:{
+                        console.log("other acts");
+                    }
+                }
+                this.cycle()
             }
 
 
@@ -361,23 +363,22 @@ const Game = class {
         const { dead_list } = this.vars
         let alive_list = all_users.filter(e => !dead_list.includes(e.user_id))
         alive_list = alive_list.map(e => {
-            const { socket_id, device_id, user_id } = e
-            return { socket_id, device_id, user_id }
+            const { socket_id, device_id, user_id, role } = e
+            return { socket_id, device_id, user_id, role }
         })
-        console.log({ alive_list });
         return alive_list
     }
     async start_vote() {
         let { vote_type } = this.vars
+        console.log({ vote_type });
         let user_to_vote = vote_type === "pre_vote" ? this.pick_live_users() : [...this.vars.vote_to_exit || []]
-        console.log(user_to_vote, vote_type);
         const { game_id } = this
-        this.vars.edit_event("edit", "queue", user_to_vote)
+        this.vars.edit_event("edit", "queue", user_to_vote, "start_vote")
         this.vars.edit_event("edit", "turn", -1)
         this.vars.edit_event("edit", "cur_event", vote_type === "pre_vote" ? "pre_vote" : "exit_vote")
-        await delay(2)
+        await delay(5)
         this.socket.to(game_id).emit("vote_phase")
-        await delay(3)
+        await delay(5)
         this.vars.edit_event("edit", "next_event", vote_type === "pre_vote" ? "next_player_pre_vote" : "exit_vote")
         this.cycle()
 
@@ -387,7 +388,6 @@ const Game = class {
         await Voice.start_room(game_id)
         for (let user of users) {
             const { user_id, socket_id } = user
-            console.log();
             let token = Voice.join_room(user_id, game_id)
             this.socket.to(socket_id).emit("voice_bridge_token", { token })
         }
@@ -398,9 +398,12 @@ const Game = class {
         let all_votes = this.db.getAll("vote_recorde")
         let users_voted = live_users.filter(user => {
             const { user_id } = user
-            let user_votes = all_votes.filter(v => v.to.user_id == user_id && v.day === day && v.type === type)
-            if (user_votes > 0) return true
+            let user_votes = all_votes.filter(v => {
+                return v.to.user_id == user_id && v.day == day && v.type === type
+            })
+            if (user_votes.length > 0) return true
         })
+
         this.vars.vote_to_exit = users_voted
         users_voted.forEach(e => {
             this.db.add_data("voted_for_exit", e)
@@ -409,7 +412,8 @@ const Game = class {
     }
 
     count_exit_votes() {
-        const { queue, day, game_id } = this
+        const { game_id, vars } = this
+        const { queue, day } = vars
         let all_votes = this.db.getAll("vote_recorde")
         let users_voted = queue.map(user => {
             const { user_id } = user
@@ -445,15 +449,14 @@ const Game = class {
         this.socket.to(this.game_id).emit("nigth_event", { msg })
     }
 
-
     async start_night() {
-        const { game_id, day } = this.users
-        this.vars.edit_event("edit", "time", "night")
+        const { game_id, vars } = this
+        const { day } = vars
+        this.vars.edit_event("edit", "time", "night", "time")
         this.socket.to(game_id).emit("time_change", { time: "night" })
-        this.vars.edit_event("edit", "next_event", "guard_act")
         this.db.add_data("night_records", { night: day, records: [] })
-        await delay(3)
-        this.cycle()
+        await delay(4)
+        await this.guard_act()
     }
 
 
@@ -484,23 +487,20 @@ const Game = class {
 
         }
 
-        this.vars.edit_event("edit", "next_event", "take_hosteg")
     }
     async take_hosteg() {
         let mafia_list = this.vars.mafia
-        mafia_list = mafia_list.filter(e => e.role !== "hostageـtaker")
-        for (let mafia of mafia_list) {
-            this.socket.to(mafia.socket_id).emit("tkae_host_phase")
-        }
         let dead_list = [...this.vars.dead_list]
         mafia_list = mafia_list.filter(e => !dead_list.includes(e.user_id))
-        let hosteg_taker = mafia_list.find(e => e.role === "hosteg_taker")
-        if (hosteg_taker) {
+        console.log({mafia_list});
+        let hostageـtaker = mafia_list.find(e => e.role === "hostageـtaker")
+        if (hostageـtaker) {
             let live_uesrs = this.pick_live_users()
-            this.socket.to(hosteg_taker.socket_id).emit("take_hosteg", { count: live_uesrs.length > 8 ? 2 : 1 })
+            let users_list=this.user_filter("hostageـtaker")
+            this.socket.to(hostageـtaker.socket_id).emit("act", { count: live_uesrs.length > 8 ? 2 : 1 ,role:"hostageـtaker",users:users_list})
         }
         else {
-            await delay(4)
+            await delay(2)
             this.vars.edit_event("edit", "next_event", "other_acts")
             this.cycle()
         }
@@ -510,22 +510,24 @@ const Game = class {
 
     async guard_act() {
 
-        let gurd = this.db.getOne("users", "role", "guard")
+        let guard = this.db.getOne("users", "role", "guard")
         let { dead_list } = this.vars
-        this.brodcast_event("gurd")
-        if (dead_list.includes(gurd.user_id)) {
-            await delay(4)
-            this.vars.edit_event("edit", "next_event", "mafia_shot")
+        this.brodcast_event("guard")
+        if (dead_list.includes(guard.user_id)) {
+            await delay(2)
+            this.vars.edit_event("edit", "next_event", "take_hosteg")
             this.cycle()
         }
         else {
-            this.socket.emit("gurd_act", { users: this.user_filter("gurd") })
+            this.vars.edit_event("edit", "cur_event", "act_guard")
+            this.socket.to(guard.socket_id).emit("act", { users: this.user_filter("guard"), role: "guard", count: 2 })
         }
 
     }
 
 
     user_filter(role) {
+        console.log(role);
         let live_users = this.pick_live_users()
         switch (role) {
             case ("doctor"): {
@@ -533,14 +535,25 @@ const Game = class {
                 if (doctor_self_save) {
                     return live_users.filter(e => e.role !== "doctor")
                 }
+                break
             }
             case ("detective"): {
                 let already_detected = this.db.getAll("night_record").filter(e => e.event === "detect")
                 let already_detected_ids = already_detected.map(e => e.user.player)
                 return live_users.filter(e => !already_detected_ids.includes(e.user_id))
             }
+            case("hostageـtaker"):{
+                let live_users=this.pick_live_users()
+                let mafia=this.vars.mafia
+                console.log({mafia});
+                mafia=mafia.map(e=>e.user_id)
+                live_users=live_users.filter(e=>!mafia.includes(e.user_id))
+                return live_users
+            }
             default: {
-                return live_users.filter(e => e.role !== role)
+                return live_users.filter(e => {
+                    return e.role !== role
+                })
             }
         }
     }
@@ -552,7 +565,7 @@ const Game = class {
         let prv_acts = this.db.getOne("night_records", "night", day)
         const { records } = prv_acts
         let hosteges = [...records.filter(e => e.event === "hosteg")]
-        let saved = [...records.filter(e => e.event === "gurd")]
+        let saved = [...records.filter(e => e.event === "guard")]
         hosteges = hosteges.map(e => e.player)
         saved = saved.map(e => e.player)
         hosteges = hosteges.filter(e => !saved.includes(e))
@@ -560,7 +573,7 @@ const Game = class {
         def_roles = def_roles.map(e => e.role)
         const { day } = this.vars
         prv_acts = prv_acts.filter(e => e.day === day)
-        let dis_users = ["citizen", "god_fhater", "nato", "hostageـtaker", "gurd"].concat(def_roles)
+        let dis_users = ["citizen", "god_fhater", "nato", "hostageـtaker", "guard"].concat(def_roles)
         live_users = live_users.filter(e => !dis_users.includes(e.role))
         for (let user of users_with_role) {
             this.socket.to(user.socket_id).emit("night_act", { users: this.user_filter(user.role) })

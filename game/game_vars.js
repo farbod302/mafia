@@ -11,7 +11,8 @@ const game_vars = {
     w8:[],
     reval:false,
     vote_type:"pre_vote",
-    edit_event(op, event, value) {
+    edit_event(op, event, value,from) {
+        console.log(`event change to ${value} from ${from}`);
         switch (op) {
             case ("edit"): {
                 return this[event] = value == "plus" ? this[event] + 1 : value
