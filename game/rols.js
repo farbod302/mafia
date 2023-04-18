@@ -9,7 +9,7 @@ const Rols = {
         "guard",
         "godfather",
         "nato",
-        "hostageـtaker",
+        "hostage_taker",
     ]
 }
 

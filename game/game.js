@@ -179,6 +179,14 @@ const Game = class {
                 this.take_hosteg()
                 break
             }
+            case ("mafia_shot"): {
+                this.mafia_shot()
+                break
+            }
+            case ("other_acts"): {
+                this.other_acts()
+                break
+            }
         }
 
     }
@@ -217,7 +225,7 @@ const Game = class {
         const mafia_rols = [
             "godfather",
             "nato",
-            "hostageـtaker",
+            "hostage_taker",
         ]
         let all_users = this.db.getAll("users")
         let mafia = all_users.filter(e => mafia_rols.includes(e.role))
@@ -336,19 +344,28 @@ const Game = class {
                     player: users
                 }
 
-                this.db.add_data("night_record", { night: day, records: [new_record] })
-                console.log(this.db.getOne("night_record", "night", 1));
+                let event = this.db.getOne("night_record", "night", 1)
+                if (!event) {
+                    this.db.add_data("night_record", { night: day, records: [new_record] })
+                } else {
+                    event.records.push(new_record)
+                    this.db.replaceOne("night_record","night",day,event)
+                }
 
                 switch (role) {
                     case ("guard"): {
                         this.vars.edit_event("edit", "next_event", "take_hostage")
                         break
                     }
-                    case ("hostageـtaker"): {
+                    case ("hostage_taker"): {
                         this.vars.edit_event("edit", "next_event", "mafia_shot")
                         break
                     }
-                    default:{
+                    case ("mafia_shot"): {
+                        this.vars.edit_event("edit", "next_event", "other_acts")
+                        break
+                    }
+                    default: {
                         console.log("other acts");
                     }
                 }
@@ -462,7 +479,7 @@ const Game = class {
 
     mafia_shot() {
         let mafia_list = this.vars.mafia
-        mafia_list = mafia_list.filter(e => e.role !== "hostageـtaker")
+        mafia_list = mafia_list.filter(e => e.role !== "hostage_taker")
         for (let mafia of mafia_list) {
             this.socket.to(mafia.socket_id).emit("mafia_shot_phase")
 
@@ -472,17 +489,17 @@ const Game = class {
         let dead_list = [...this.vars.dead_list]
         mafia_list = mafia_list.filter(e => !dead_list.includes(e.user_id))
         let god_father = mafia_list.find(e => e.role === "god_father")
-
+        let user_list=this.user_filter("hostage_taker")
         if (god_father) {
-            this.socket.to(god_father.socket_id).emit("make_shot")
+            this.socket.to(god_father.socket_id).emit("act",{role:"mafia_shot",users:user_list})
         }
         else {
             let nato = mafia_list.find(e => e.role === "nato")
             if (nato) {
-                this.socket.to(nato.socket_id).emit("make_shot")
+                this.socket.to(nato.socket_id).emit("act",{role:"mafia_shot",users:user_list})
             }
             else {
-                this.socket.to(mafia_list[0].socket_id).emit("make_shot")
+                this.socket.to(mafia_list[0].socket_id).emit("act",{role:"mafia_shot",users:user_list})
             }
 
         }
@@ -492,16 +509,16 @@ const Game = class {
         let mafia_list = this.vars.mafia
         let dead_list = [...this.vars.dead_list]
         mafia_list = mafia_list.filter(e => !dead_list.includes(e.user_id))
-        console.log({mafia_list});
-        let hostageـtaker = mafia_list.find(e => e.role === "hostageـtaker")
-        if (hostageـtaker) {
+        console.log({ mafia_list });
+        let hostage_taker = mafia_list.find(e => e.role === "hostage_taker")
+        if (hostage_taker) {
             let live_uesrs = this.pick_live_users()
-            let users_list=this.user_filter("hostageـtaker")
-            this.socket.to(hostageـtaker.socket_id).emit("act", { count: live_uesrs.length > 8 ? 2 : 1 ,role:"hostageـtaker",users:users_list})
+            let users_list = this.user_filter("hostage_taker")
+            this.socket.to(hostage_taker.socket_id).emit("act", { count: live_uesrs.length > 8 ? 2 : 1, role: "hostage_taker", users: users_list })
         }
         else {
             await delay(2)
-            this.vars.edit_event("edit", "next_event", "other_acts")
+            this.vars.edit_event("edit", "next_event", "hostage_taker")
             this.cycle()
         }
 
@@ -542,12 +559,12 @@ const Game = class {
                 let already_detected_ids = already_detected.map(e => e.user.player)
                 return live_users.filter(e => !already_detected_ids.includes(e.user_id))
             }
-            case("hostageـtaker"):{
-                let live_users=this.pick_live_users()
-                let mafia=this.vars.mafia
-                console.log({mafia});
-                mafia=mafia.map(e=>e.user_id)
-                live_users=live_users.filter(e=>!mafia.includes(e.user_id))
+            case ("hostage_taker"): {
+                let live_users = this.pick_live_users()
+                let mafia = this.vars.mafia
+                console.log({ mafia });
+                mafia = mafia.map(e => e.user_id)
+                live_users = live_users.filter(e => !mafia.includes(e.user_id))
                 return live_users
             }
             default: {
@@ -573,7 +590,7 @@ const Game = class {
         def_roles = def_roles.map(e => e.role)
         const { day } = this.vars
         prv_acts = prv_acts.filter(e => e.day === day)
-        let dis_users = ["citizen", "god_fhater", "nato", "hostageـtaker", "guard"].concat(def_roles)
+        let dis_users = ["citizen", "god_fhater", "nato", "hostage_taker", "guard"].concat(def_roles)
         live_users = live_users.filter(e => !dis_users.includes(e.role))
         for (let user of users_with_role) {
             this.socket.to(user.socket_id).emit("night_act", { users: this.user_filter(user.role) })
@@ -597,7 +614,7 @@ const Game = class {
         if (commando_shot) {
             const s_player = this.db.getOne("users", "user_id", commando_shot)
             const { role } = s_player
-            if (role === "nato" || role === "hostageـtaker") {
+            if (role === "nato" || role === "hostage_taker") {
                 mafia_shot = commando_shot
             }
             if (role === "god_father") {
@@ -622,7 +639,7 @@ const Game = class {
         if (detective_req) {
             let req = this.db.getOne("users", "user_id", detective_req)
             let detective = this.db.getOne("users", "role", "detective")
-            if (req.role === "nato" || req.role === "hostageـtaker") {
+            if (req.role === "nato" || req.role === "hostage_taker") {
                 this.socket.to(detective.socket_id).emit("detect_result", { user: req, is_mafia: true })
             }
             else {
